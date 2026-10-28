@@ -1,0 +1,6 @@
+{
+  "name": "Avaliação Prêmio Dissertação PPG/GIT 2025 - Univale",
+  "description": "Sistema de avaliação da comissão para o Prêmio de Melhor Dissertação do PPG em Gestão Integrada do Território (GIT/Univale) 2025.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
