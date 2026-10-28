@@ -213,13 +213,36 @@ export async function registrarAtaHomologadaSupabase(dadosAta: {
 // Carregar lista de membros da comissão avaliadora do Supabase
 export async function carregarMembrosComissaoSupabase(): Promise<Avaliador[] | null> {
   try {
-    const { data, error } = await supabase
-      .from('membros_comissao')
+    // A tela de login roda ANTES de haver sessão, então precisa de uma fonte
+    // legível por anon. A view membros_publicos expõe só o necessário (sem senha).
+    // Fallback para a tabela enquanto a migration 0002 não estiver aplicada.
+    let data: any[] | null = null;
+    let error: any = null;
+
+    const publicos = await supabase
+      .from('membros_publicos')
       .select('*')
       .order('nome', { ascending: true });
 
+    if (!publicos.error && publicos.data && publicos.data.length > 0) {
+      // A view só serve se trouxer o e-mail (necessário para o signInWithPassword)
+      const temEmail = publicos.data.every((r: any) => Boolean(r.email));
+      if (temEmail) {
+        data = publicos.data;
+      }
+    }
+
+    if (!data) {
+      const tabela = await supabase
+        .from('membros_comissao')
+        .select('*')
+        .order('nome', { ascending: true });
+      data = tabela.data as any[] | null;
+      error = tabela.error;
+    }
+
     if (error) {
-      console.warn('Tabela membros_comissao indisponível ou vazia no Supabase:', error.message);
+      console.warn('Lista de membros indisponível no Supabase:', error.message);
       return null;
     }
 

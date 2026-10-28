@@ -8,6 +8,11 @@
 -- qualquer coisa. Este script substitui essas policies por regras reais.
 --
 -- Rode no SQL Editor do Supabase, na ordem. Faça backup antes.
+--
+-- ORDEM IMPORTA: o app novo lista os membros por membros_publicos (que inclui
+-- o e-mail). Aplique esta migration ANTES de publicar um build, senão a tela
+-- de login fica sem a lista de membros. O app atual tem fallback para
+-- membros_comissao, então consegue operar nas duas situações.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -96,8 +101,10 @@ create policy membros_admin_presidente on public.membros_comissao
   using (public.sou_presidente())
   with check (public.sou_presidente());
 
+-- A tela de login precisa listar os membros ANTES de existir sessão.
+-- O e-mail é o usuário do Supabase Auth; sem ele o app não consegue entrar.
 create or replace view public.membros_publicos as
-  select id, nome, titulacao, instituicao, papel, ordem
+  select id, nome, titulacao, instituicao, papel, email, ordem
   from public.membros_comissao
   order by ordem;
 
@@ -188,11 +195,13 @@ grant execute on function public.consolidacao_presidente() to authenticated;
 --    (a policy original permitia upload por qualquer um, inclusive anon,
 --     o que permite trocar o PDF de uma dissertação)
 -- ---------------------------------------------------------------------
+drop policy if exists "Leitura pública dos PDFs" on storage.objects;
 create policy "Leitura pública dos PDFs"
 on storage.objects for select
 to anon, authenticated
 using (bucket_id in ('dissertacoes', 'atas-oficiais'));
 
+drop policy if exists "Upload apenas pela presidência" on storage.objects;
 create policy "Upload apenas pela presidência"
 on storage.objects for insert
 to authenticated
@@ -201,6 +210,7 @@ with check (
   and public.sou_presidente()
 );
 
+drop policy if exists "Atualização apenas pela presidência" on storage.objects;
 create policy "Atualização apenas pela presidência"
 on storage.objects for update
 to authenticated
