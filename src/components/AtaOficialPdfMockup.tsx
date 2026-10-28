@@ -42,6 +42,7 @@ export const AtaOficialPdfMockup: React.FC<AtaOficialPdfMockupProps> = ({
   const [copiado, setCopiado] = useState(false);
   const [salvandoSupabase, setSalvandoSupabase] = useState(false);
   const [salvoSupabaseFeedback, setSalvoSupabaseFeedback] = useState(false);
+  const [erroAta, setErroAta] = useState<string | null>(null);
 
   if (!aberto) return null;
 
@@ -63,8 +64,19 @@ export const AtaOficialPdfMockup: React.FC<AtaOficialPdfMockupProps> = ({
     window.print();
   };
 
+  // A Ata só pode ser homologada com a comissão inteira concluída
+  const totalEsperado = ranking.length * avaliadores.length;
+  const totalLancado = ranking.reduce((soma, item) => soma + item.totalAvaliacoes, 0);
+  const ataCompleta = totalEsperado > 0 && totalLancado >= totalEsperado;
+
   const handleSalvarNoSupabase = async () => {
     if (!primeiroLugar) return;
+
+    if (!ataCompleta) {
+      setErroAta(`Ata não pode ser homologada: ${totalLancado} de ${totalEsperado} avaliações concluídas. Faltam ${totalEsperado - totalLancado}.`);
+      setTimeout(() => setErroAta(null), 6000);
+      return;
+    }
     setSalvandoSupabase(true);
     const res = await registrarAtaHomologadaSupabase({
       presidenteId: presidente.id,
@@ -86,7 +98,7 @@ export const AtaOficialPdfMockup: React.FC<AtaOficialPdfMockupProps> = ({
     t += `PRÊMIO DE MELHOR DISSERTAÇÃO DO PPG/GIT DE 2025 · EDITAL Nº 115/2026\n`;
     t += `Presidente: ${presidente.nome} (${presidente.instituicao})\n\n`;
     ranking.forEach((r) => {
-      t += `${r.posicao}º LUGAR: ${r.dissertacao.autor} - Nota Final: ${r.notaMediaFinal100.toFixed(2)} pts (Likert: ${r.mediaLikert75.toFixed(1)}/75 + Livre: ${r.mediaNotaLivre25.toFixed(1)}/25)\n`;
+      t += `${r.posicao > 0 ? `${r.posicao}º LUGAR` : 'SEM AVALIAÇÃO'}: ${r.dissertacao.autor} - Nota Final: ${r.notaMediaFinal100.toFixed(2)} pts (Likert: ${r.mediaLikert75.toFixed(1)}/75 + Livre: ${r.mediaNotaLivre25.toFixed(1)}/25)\n`;
       t += `   "${r.dissertacao.titulo}"\n\n`;
     });
     navigator.clipboard.writeText(t);
@@ -98,6 +110,16 @@ export const AtaOficialPdfMockup: React.FC<AtaOficialPdfMockupProps> = ({
     <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-950/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-6 print:p-0 print:bg-white print:static">
       <div className="bg-stone-100 border border-stone-300 w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[94vh] print:max-h-none print:border-none print:shadow-none print:rounded-none">
         
+        {(erroAta || !ataCompleta) && (
+          <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-900 font-medium flex items-start gap-2 print:hidden">
+            <Lock className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-700" />
+            <span>
+              {erroAta ??
+                `Ata em elaboração: ${totalLancado} de ${totalEsperado} avaliações concluídas. A homologação será liberada quando a comissão concluir todas.`}
+            </span>
+          </div>
+        )}
+
         {/* Barra Superior de Controles (Oculta na Impressão) */}
         <div className="p-4 bg-stone-900 text-stone-100 border-b border-stone-800 rounded-t-2xl flex flex-wrap items-center justify-between gap-3 print:hidden">
           <div className="flex items-center gap-2">
@@ -118,9 +140,9 @@ export const AtaOficialPdfMockup: React.FC<AtaOficialPdfMockupProps> = ({
                 <button
                   type="button"
                   onClick={handleSalvarNoSupabase}
-                  disabled={salvandoSupabase}
+                  disabled={salvandoSupabase || !ataCompleta}
                   className="px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-600 rounded-lg flex items-center gap-1.5 transition-colors shadow disabled:opacity-60"
-                  title="Salvar Ata Homologada no Banco de Dados Supabase"
+                  title={ataCompleta ? 'Salvar Ata Homologada no Banco de Dados Supabase' : `Aguarde as ${totalEsperado} avaliações (${totalLancado} concluídas)`}
                 >
                   <Database className="w-3.5 h-3.5" />
                   <span>
@@ -273,7 +295,7 @@ export const AtaOficialPdfMockup: React.FC<AtaOficialPdfMockupProps> = ({
                     {ranking.map((item) => (
                       <tr key={item.dissertacao.id} className="border-b border-stone-300">
                         <td className="border border-stone-300 p-2 text-center font-bold">
-                          {item.posicao}º
+                          {item.posicao > 0 ? `${item.posicao}º` : '—'}
                         </td>
                         <td className="border border-stone-300 p-2">
                           <div className="font-bold text-stone-900">{item.dissertacao.autor}</div>

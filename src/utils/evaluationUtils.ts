@@ -119,12 +119,20 @@ export function computeConsolidatedRanking(
       notaMediaEscala5,
       mediasPorCriterio,
       votosMencaoHonrosa: votosMencao,
+      totalAvaliacoes: totalAvaliadoresComNota,
       posicao: 0,
     };
   });
 
   // Ordenação com aplicação estrita do Edital
   ranking.sort((a, b) => {
+    // 0. Dissertações sem nenhuma avaliação concluída não disputam posição.
+    //    Ficam sempre ao final, sem desempate e sem menção honrosa.
+    const aAvaliada = a.totalAvaliacoes > 0;
+    const bAvaliada = b.totalAvaliacoes > 0;
+    if (aAvaliada !== bAvaliada) return aAvaliada ? -1 : 1;
+    if (!aAvaliada && !bAvaliada) return a.dissertacao.autor.localeCompare(b.dissertacao.autor);
+
     // 1. Diferença de nota média final (0 a 100)
     if (Math.abs(b.notaMediaFinal100 - a.notaMediaFinal100) >= 0.01) {
       return b.notaMediaFinal100 - a.notaMediaFinal100;
@@ -189,9 +197,16 @@ export function computeConsolidatedRanking(
     return 0;
   });
 
-  // Atribui posições
-  ranking.forEach((item, index) => {
-    item.posicao = index + 1;
+  // Atribui posições apenas a quem possui ao menos uma avaliação concluída
+  let posicaoAtual = 0;
+  ranking.forEach((item) => {
+    if (item.totalAvaliacoes > 0) {
+      posicaoAtual += 1;
+      item.posicao = posicaoAtual;
+    } else {
+      item.posicao = 0; // "Sem avaliação"
+      item.criterioDesempateAplicado = undefined;
+    }
   });
 
   return ranking;

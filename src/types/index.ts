@@ -36,7 +36,7 @@ export interface Avaliador {
   papel: 'presidente' | 'avaliador';
   email: string;
   telefone?: string;
-  senhaAcesso: string;
+  senhaAcesso?: string; // legado — não é mais lido nem exibido
 }
 
 export interface AvaliacaoDissertacao {
@@ -74,6 +74,7 @@ export interface RankingItem {
   notaMediaEscala5: number;
   mediasPorCriterio: Record<number, number>;
   votosMencaoHonrosa: number;
-  posicao: number;
+  totalAvaliacoes: number;
+  posicao: number; // 0 = ainda sem nenhuma avaliação concluída
   criterioDesempateAplicado?: string;
 }

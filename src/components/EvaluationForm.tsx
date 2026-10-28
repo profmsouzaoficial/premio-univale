@@ -51,7 +51,7 @@ export const EvaluationForm: React.FC<EvaluationFormProps> = ({
   // Nota livre de 0 a 25 pontos (conforme solicitação expressa do usuário)
   const [notaLivre25, setNotaLivre25] = useState<number>(() => {
     if (avaliacao?.notaLivre25 !== undefined) return avaliacao.notaLivre25;
-    return 20; // sugestão inicial padrão de 0 a 25
+    return 0; // sem bônus automático: o avaliador atribui de 0 a 25
   });
 
   const [comentariosGerais, setComentariosGerais] = useState<string>(
@@ -75,6 +75,8 @@ export const EvaluationForm: React.FC<EvaluationFormProps> = ({
   );
 
   const [salvoFeedback, setSalvoFeedback] = useState<boolean>(false);
+  const [salvando, setSalvando] = useState<boolean>(false);
+  const [erroSalvar, setErroSalvar] = useState<string | null>(null);
   const [visualizadorPdfAberto, setVisualizadorPdfAberto] = useState<boolean>(false);
   const [secoesAbertas, setSecoesAbertas] = useState<Record<number, boolean>>({
     1: true,
@@ -100,7 +102,19 @@ export const EvaluationForm: React.FC<EvaluationFormProps> = ({
     setSecoesAbertas((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const handleSalvar = (marcarConcluida: boolean = false) => {
+  const handleSalvar = async (marcarConcluida: boolean = false) => {
+    if (salvando) return;
+
+    if (!isCompleto) {
+      setErroSalvar(
+        `Preencha os 15 subcritérios da escala Likert antes de salvar. Faltam ${15 - totalRespondidas}.`
+      );
+      return;
+    }
+
+    setErroSalvar(null);
+    setSalvando(true);
+
     const avaliacaoAtualizada: AvaliacaoDissertacao = {
       dissertacaoId: dissertacao.id,
       avaliadorId: avaliador.id,
@@ -119,12 +133,8 @@ export const EvaluationForm: React.FC<EvaluationFormProps> = ({
       concluida: marcarConcluida ? true : (avaliacao?.concluida ?? isCompleto),
     };
 
-    onSalvar(avaliacaoAtualizada);
-    setSalvoFeedback(true);
-    setTimeout(() => setSalvoFeedback(false), 2800);
-
-    // Sincroniza em segundo plano com o banco de dados Supabase
-    sincronizarAvaliacaoSupabase({
+    // Grava PRIMEIRO no Supabase. Só há comemoração se o banco confirmar.
+    const res = await sincronizarAvaliacaoSupabase({
       dissertacaoId: dissertacao.id,
       avaliadorId: avaliador.id,
       respostasLikert: respostas,
@@ -137,6 +147,19 @@ export const EvaluationForm: React.FC<EvaluationFormProps> = ({
       comentariosGerais,
       concluida: marcarConcluida ? true : (avaliacao?.concluida ?? isCompleto),
     });
+
+    setSalvando(false);
+
+    if (!res.success) {
+      setErroSalvar(
+        `Não foi possível gravar no servidor (${res.error ?? 'erro desconhecido'}). Sua avaliação NÃO foi salva.`
+      );
+      return;
+    }
+
+    onSalvar(avaliacaoAtualizada);
+    setSalvoFeedback(true);
+    setTimeout(() => setSalvoFeedback(false), 2800);
   };
 
   const avaliacaoJaRealizada = Boolean(
@@ -309,11 +332,17 @@ export const EvaluationForm: React.FC<EvaluationFormProps> = ({
             <div className="mt-4 pt-3 border-t border-stone-200 flex flex-col gap-2">
               <button
                 onClick={() => handleSalvar(true)}
-                className="w-full py-2.5 px-3 text-xs font-bold text-stone-950 bg-amber-400 hover:bg-amber-300 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                disabled={salvando}
+                className="w-full py-2.5 px-3 text-xs font-bold text-stone-950 bg-amber-400 hover:bg-amber-300 disabled:opacity-60 disabled:cursor-wait rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-sm"
               >
                 <Save className="w-3.5 h-3.5" />
-                <span>Salvar Avaliação da Dissertação</span>
+                <span>{salvando ? 'Gravando no servidor…' : 'Salvar Avaliação da Dissertação'}</span>
               </button>
+              {erroSalvar && (
+                <span className="text-center text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5 font-medium flex items-start justify-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> <span>{erroSalvar}</span>
+                </span>
+              )}
               {salvoFeedback && (
                 <span className="text-center text-xs text-emerald-700 font-medium flex items-center justify-center gap-1">
                   <Check className="w-3.5 h-3.5" /> Gravado com sucesso!

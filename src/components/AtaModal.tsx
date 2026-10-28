@@ -130,7 +130,7 @@ export const AtaModal: React.FC<AtaModalProps> = ({
                 {ranking.map((item) => (
                   <tr key={item.dissertacao.id} className="border-b border-stone-300">
                     <td className="border border-stone-300 p-2 text-center font-bold">
-                      {item.posicao}º
+                      {item.posicao > 0 ? `${item.posicao}º` : '—'}
                     </td>
                     <td className="border border-stone-300 p-2">
                       <div className="font-bold text-stone-900">{item.dissertacao.autor}</div>

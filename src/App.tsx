@@ -16,7 +16,8 @@ import {
   carregarAvaliacoesSupabase, 
   carregarMembrosComissaoSupabase, 
   sincronizarMembrosComissaoSupabase, 
-  atualizarSenhaMembroSupabase 
+  atualizarSenhaMembroSupabase,
+  supabase
 } from './services/supabaseClient';
 
 
@@ -27,23 +28,13 @@ const STORAGE_AVALIADOR_ID = 'ppg_git_avaliador_id_v3';
 const STORAGE_IS_PRESIDENTE = 'ppg_git_is_presidente_v3';
 
 export default function App() {
-  // Autenticação da comissão com senha "premio" ou individual
-  const [autenticado, setAutenticado] = useState<boolean>(() => {
-    try {
-      return sessionStorage.getItem(STORAGE_AUTH_KEY) === 'true';
-    } catch {
-      return false;
-    }
-  });
+  // A sessão NUNCA é concedida por sessionStorage: ela é revalidada no Supabase Auth.
+  const [autenticado, setAutenticado] = useState<boolean>(false);
 
-  // Flag se o presidente está com credencial autenticada ("presidente")
-  const [isPresidenteAutenticado, setIsPresidenteAutenticado] = useState<boolean>(() => {
-    try {
-      return sessionStorage.getItem(STORAGE_IS_PRESIDENTE) === 'true';
-    } catch {
-      return false;
-    }
-  });
+  // Derivado do papel do membro autenticado (nunca de flag local)
+  const [isPresidenteAutenticado, setIsPresidenteAutenticado] = useState<boolean>(false);
+
+  const [restaurandoSessao, setRestaurandoSessao] = useState<boolean>(true);
 
   // Inicialização de avaliadores em ordem alfabética
   const [avaliadores, setAvaliadores] = useState<Avaliador[]>(() => {
@@ -84,6 +75,9 @@ export default function App() {
   const avaliadorAtivo =
     avaliadores.find((a) => a.id === avaliadorAtivoId) || avaliadores[0];
 
+  // Presidência = membro autenticado cujo papel é 'presidente'.
+  const isPresidente = autenticado && avaliadorAtivo?.papel === 'presidente';
+
   // Carregamento inicial da lista de membros do Supabase
   useEffect(() => {
     let ativo = true;
@@ -97,13 +91,37 @@ export default function App() {
     return () => { ativo = false; };
   }, []);
 
+  // Revalida a sessão junto ao Supabase Auth. Sem sessão válida, volta ao login.
+  useEffect(() => {
+    let ativo = true;
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const email = data.session?.user?.email?.toLowerCase();
+        if (ativo && email && avaliadores.length > 0) {
+          const membro = avaliadores.find((a) => a.email?.toLowerCase() === email);
+          if (membro) {
+            setAvaliadorAtivoId(membro.id);
+            setIsPresidenteAutenticado(membro.papel === 'presidente');
+            setAutenticado(true);
+          }
+        }
+      } catch (e) {
+        console.warn('Não foi possível revalidar a sessão.', e);
+      } finally {
+        if (ativo) setRestaurandoSessao(false);
+      }
+    })();
+    return () => { ativo = false; };
+  }, [avaliadores]);
+
   // Carregamento de avaliações do Supabase para o avaliador ativo (ou todas se for o Presidente)
   useEffect(() => {
     let ativo = true;
     async function carregar() {
       if (!autenticado || !avaliadorAtivoId) return;
       setCarregandoSupabase(true);
-      const isPres = isPresidenteAutenticado || avaliadorAtivo?.papel === 'presidente';
+      const isPres = isPresidente;
       const dados = await carregarAvaliacoesSupabase(avaliadorAtivoId, Boolean(isPres));
       if (ativo) {
         setAvaliacoes(dados);
@@ -112,7 +130,7 @@ export default function App() {
     }
     carregar();
     return () => { ativo = false; };
-  }, [autenticado, avaliadorAtivoId, isPresidenteAutenticado, avaliadorAtivo?.papel]);
+  }, [autenticado, avaliadorAtivoId, isPresidente]);
 
   useEffect(() => {
     try {
@@ -126,11 +144,6 @@ export default function App() {
     setAvaliadorAtivoId(avaliador.id);
     setIsPresidenteAutenticado(isPres);
     setAutenticado(true);
-    try {
-      sessionStorage.setItem(STORAGE_AUTH_KEY, 'true');
-      sessionStorage.setItem(STORAGE_AVALIADOR_ID, avaliador.id);
-      sessionStorage.setItem(STORAGE_IS_PRESIDENTE, isPres ? 'true' : 'false');
-    } catch {}
 
     // Puxa as avaliações reais deste docente diretamente do Supabase
     setCarregandoSupabase(true);
@@ -141,30 +154,19 @@ export default function App() {
     exibirToast(`Acesso concedido: ${avaliador.nome}${isPres ? ' (Presidente)' : ''}`);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Encerra também a sessão do Supabase Auth
+    try { await supabase.auth.signOut(); } catch {}
     setAutenticado(false);
     setIsPresidenteAutenticado(false);
     setAvaliacoes({});
-    try {
-      sessionStorage.removeItem(STORAGE_AUTH_KEY);
-      sessionStorage.removeItem(STORAGE_AVALIADOR_ID);
-      sessionStorage.removeItem(STORAGE_IS_PRESIDENTE);
-    } catch {}
     exibirToast('Sessão encerrada com segurança.');
   };
 
 
-  const handleAutenticarPresidente = (senha: string): boolean => {
-    if (senha.trim().toLowerCase() === 'presidente') {
-      setIsPresidenteAutenticado(true);
-      try {
-        sessionStorage.setItem(STORAGE_IS_PRESIDENTE, 'true');
-      } catch {}
-      exibirToast('Acesso de Presidente autenticado com sucesso!');
-      return true;
-    }
-    return false;
-  };
+  // A tela da Ata só é acessível ao presidente já autenticado.
+  // Não existe mais credencial mestra: qualquer outra tentativa é recusada.
+  const handleAutenticarPresidente = (_senha: string): boolean => false;
 
   const exibirToast = (msg: string) => {
     setToastMensagem(msg);
@@ -182,7 +184,7 @@ export default function App() {
         },
       };
     });
-    exibirToast('Avaliação registrada com sucesso!');
+    // O aviso de sucesso é emitido pelo formulário, somente após o Supabase confirmar.
   };
 
   const handleSalvarAvaliadores = async (novosAvaliadores: Avaliador[]) => {
@@ -303,7 +305,7 @@ export default function App() {
 
   const handleRecarregarSupabase = async () => {
     setCarregandoSupabase(true);
-    const isPres = isPresidenteAutenticado || avaliadorAtivo?.papel === 'presidente';
+    const isPres = isPresidente;
     const dados = await carregarAvaliacoesSupabase(avaliadorAtivoId, Boolean(isPres));
     setAvaliacoes(dados);
     setCarregandoSupabase(false);
@@ -324,7 +326,16 @@ export default function App() {
     avaliacoes
   );
 
-  // Se não estiver autenticado com a senha "premio" / senha pessoal, exibe tela de login
+  // Enquanto o Supabase Auth não confirma a sessão, não exibimos nem login nem conteúdo
+  if (restaurandoSessao) {
+    return (
+      <div className="min-h-screen bg-stone-950 flex items-center justify-center text-stone-400 text-sm gap-2">
+        <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+        Verificando credenciais…
+      </div>
+    );
+  }
+
   if (!autenticado) {
     return (
       <LoginScreen
@@ -355,7 +366,7 @@ export default function App() {
         abrirModalAtaMockup={() => setModalAtaMockupAberto(true)}
         totalConcluidas={totalConcluidasDoAvaliador}
         onLogout={handleLogout}
-        isPresidente={isPresidenteAutenticado || avaliadorAtivo.papel === 'presidente'}
+        isPresidente={isPresidente}
       />
 
       {/* Main Container */}
@@ -372,21 +383,28 @@ export default function App() {
               avaliacoesDoAvaliador={avaliacoesDoAvaliadorAtivo}
             />
 
-            <EvaluationForm
-              key={`${dissertacaoAtiva.id}-${avaliadorAtivo.id}`}
-              dissertacao={dissertacaoAtiva}
-              avaliador={avaliadorAtivo}
-              avaliacao={avaliacaoAtiva}
-              onSalvar={handleSalvarAvaliacao}
-              onNavegar={handleNavegar}
-              indexAtual={indexAtual}
-              totalDissertacoes={DISSERTACOES_INDICADAS.length}
-            />
+            {carregandoSupabase ? (
+              <div className="bg-white border border-stone-200 rounded-2xl p-10 text-center text-sm text-stone-500 flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-amber-500" />
+                Carregando as avaliações deste membro…
+              </div>
+            ) : (
+              <EvaluationForm
+                key={`${dissertacaoAtiva.id}-${avaliadorAtivo.id}`}
+                dissertacao={dissertacaoAtiva}
+                avaliador={avaliadorAtivo}
+                avaliacao={avaliacaoAtiva}
+                onSalvar={handleSalvarAvaliacao}
+                onNavegar={handleNavegar}
+                indexAtual={indexAtual}
+                totalDissertacoes={DISSERTACOES_INDICADAS.length}
+              />
+            )}
           </div>
         )}
 
         {abaAtiva === 'consolidacao' && (
-          isPresidenteAutenticado || avaliadorAtivo.papel === 'presidente' ? (
+          isPresidente ? (
             <ConsolidationView
               dissertacoes={DISSERTACOES_INDICADAS}
               avaliadores={avaliadores}
@@ -429,7 +447,7 @@ export default function App() {
         onFechar={() => setModalComissaoAberto(false)}
         avaliadores={avaliadores}
         avaliadorLogado={avaliadorAtivo}
-        isPresidente={Boolean(isPresidenteAutenticado || avaliadorAtivo?.papel === 'presidente')}
+        isPresidente={isPresidente}
         onSalvarAvaliadores={handleSalvarAvaliadores}
         onAtualizarSenha={handleAtualizarSenha}
       />
@@ -447,7 +465,7 @@ export default function App() {
         onFechar={() => setModalAtaMockupAberto(false)}
         ranking={rankingConsolidado}
         avaliadores={avaliadores}
-        isPresidenteAutenticado={isPresidenteAutenticado}
+        isPresidenteAutenticado={isPresidente}
         onAutenticarPresidente={handleAutenticarPresidente}
       />
 

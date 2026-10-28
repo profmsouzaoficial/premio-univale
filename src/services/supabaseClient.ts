@@ -232,7 +232,7 @@ export async function carregarMembrosComissaoSupabase(): Promise<Avaliador[] | n
         papel: row.papel === 'presidente' ? 'presidente' : 'avaliador',
         email: row.email,
         telefone: row.telefone || '',
-        senhaAcesso: row.senha_acesso || 'premio',
+        // A senha nunca é carregada para o cliente: a autenticação é feita no Supabase Auth.
       }));
     }
     return null;

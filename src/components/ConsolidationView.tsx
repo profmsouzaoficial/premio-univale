@@ -417,7 +417,7 @@ export const ConsolidationView: React.FC<ConsolidationViewProps> = ({
                             ? 'bg-stone-300 text-stone-800'
                             : 'bg-stone-100 text-stone-600'
                         }`}>
-                          {item.posicao}º
+                          {item.posicao > 0 ? `${item.posicao}º` : '—'}
                         </span>
                       </td>
 
