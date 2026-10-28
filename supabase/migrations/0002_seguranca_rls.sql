@@ -103,7 +103,14 @@ create policy membros_admin_presidente on public.membros_comissao
 
 -- A tela de login precisa listar os membros ANTES de existir sessão.
 -- O e-mail é o usuário do Supabase Auth; sem ele o app não consegue entrar.
-create or replace view public.membros_publicos as
+--
+-- Usamos DROP + CREATE (e não CREATE OR REPLACE) de propósito: o
+-- CREATE OR REPLACE VIEW só aceita colunas NOVAS no fim da lista. Se a view
+-- já existir com (id, nome, ..., papel, ordem), tentar inserir "email" antes
+-- de "ordem" falha com 42P16: cannot change name of view column "ordem".
+drop view if exists public.membros_publicos cascade;
+
+create view public.membros_publicos as
   select id, nome, titulacao, instituicao, papel, email, ordem
   from public.membros_comissao
   order by ordem;
