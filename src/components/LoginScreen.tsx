@@ -10,10 +10,10 @@ import {
   AlertCircle,
   Building,
   Mail,
-  Loader2
+  Loader2,
 } from 'lucide-react';
 import { Avaliador } from '../types';
-import { autenticarProfessorSupabase, LOGO_UNIVALE_URL } from '../services/supabaseClient';
+import { autenticarProfessorSupabase, LOGO_UNIVALE_URL, supabase } from '../services/supabaseClient';
 
 interface LoginScreenProps {
   avaliadores: Avaliador[];
@@ -43,7 +43,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       return;
     }
 
-    const senhaDigitada = senha.trim().toLowerCase();
+    const senhaDigitada = senha.trim();
     if (!senhaDigitada) {
       setErro('Por favor, digite a senha de acesso.');
       return;
@@ -51,29 +51,71 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
     setCarregando(true);
 
-    // Validação da senha personalizada, compartilhada "premio" ou da credencial específica da presidência
-    const isValida = 
-      senha.trim() === professorSelecionado.senhaAcesso ||
-      senhaDigitada === 'premio' || 
-      senhaDigitada === (professorSelecionado.senhaAcesso || '').toLowerCase() ||
-      (professorSelecionado.papel === 'presidente' && senhaDigitada === 'presidente');
+    // Consulta em tempo real no Supabase caso o professor tenha redefinido a senha
+    let membroAtual: Avaliador = professorSelecionado;
+    try {
+      const { data, error } = await supabase
+        .from('membros_comissao')
+        .select('*')
+        .eq('id', professorSelecionado.id)
+        .maybeSingle();
+
+      if (!error && data) {
+        membroAtual = {
+          id: data.id,
+          nome: data.nome,
+          titulacao: data.titulacao || 'Dr.',
+          instituicao: data.instituicao,
+          papel: data.papel === 'presidente' ? 'presidente' : 'avaliador',
+          email: data.email,
+          telefone: data.telefone || '',
+          senhaAcesso: data.senha_acesso || 'premio',
+        };
+      }
+    } catch {
+      // Fallback para os dados locais se offline ou tabela ainda não criada
+    }
+
+    const senhaCadastrada = (membroAtual.senhaAcesso || 'premio').trim();
+    const foiAlterada = senhaCadastrada !== 'premio';
+
+    let isValida = false;
+    if (foiAlterada) {
+      // Quando o usuário trocou a senha:
+      // A senha padrão "premio" DEIXA DE SER ACEITA.
+      // Aceita APENAS a nova senha do usuário!
+      isValida =
+        senhaDigitada === senhaCadastrada ||
+        senhaDigitada.toLowerCase() === senhaCadastrada.toLowerCase();
+    } else {
+      // Se ainda não trocou (continua com a senha inicial padrão "premio"):
+      isValida =
+        senhaDigitada.toLowerCase() === 'premio' ||
+        (membroAtual.papel === 'presidente' && senhaDigitada.toLowerCase() === 'presidente');
+    }
 
     if (!isValida) {
       setCarregando(false);
-      setErro(`Senha incorreta para ${professorSelecionado.nome}. Verifique a senha da comissão.`);
+      if (foiAlterada && senhaDigitada.toLowerCase() === 'premio') {
+        setErro(
+          `A senha padrão "premio" foi revogada para ${membroAtual.nome}. Por favor, digite a sua nova senha pessoal cadastrada.`
+        );
+      } else {
+        setErro(`Senha incorreta para ${membroAtual.nome}.`);
+      }
       return;
     }
 
     // Tenta autenticar na instância Supabase Auth (sem bloquear caso offline)
     try {
-      await autenticarProfessorSupabase(professorSelecionado.email, senha.trim());
+      await autenticarProfessorSupabase(membroAtual.email, senhaDigitada);
     } catch {
       // Ignora erro se Supabase auth estiver em modo anônimo
     }
 
     setCarregando(false);
-    const isPres = professorSelecionado.papel === 'presidente';
-    onLoginSucesso(professorSelecionado, isPres);
+    const isPres = membroAtual.papel === 'presidente';
+    onLoginSucesso(membroAtual, isPres);
   };
 
   return (
