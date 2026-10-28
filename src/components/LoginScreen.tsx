@@ -51,10 +51,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
     setCarregando(true);
 
-    // Validação da senha compartilhada "premio" ou da credencial específica da presidência
+    // Validação da senha personalizada, compartilhada "premio" ou da credencial específica da presidência
     const isValida = 
+      senha.trim() === professorSelecionado.senhaAcesso ||
       senhaDigitada === 'premio' || 
-      senhaDigitada === professorSelecionado.senhaAcesso.toLowerCase() ||
+      senhaDigitada === (professorSelecionado.senhaAcesso || '').toLowerCase() ||
       (professorSelecionado.papel === 'presidente' && senhaDigitada === 'presidente');
 
     if (!isValida) {

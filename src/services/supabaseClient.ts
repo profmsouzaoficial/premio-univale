@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { Avaliador } from '../types';
 
 export const SUPABASE_URL = 
   import.meta.env.VITE_SUPABASE_URL || 'https://pwusflbyvamjnfmuvagy.supabase.co';
@@ -208,3 +209,108 @@ export async function registrarAtaHomologadaSupabase(dadosAta: {
     return { success: false, error: message };
   }
 }
+
+// Carregar lista de membros da comissão avaliadora do Supabase
+export async function carregarMembrosComissaoSupabase(): Promise<Avaliador[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from('membros_comissao')
+      .select('*')
+      .order('nome', { ascending: true });
+
+    if (error) {
+      console.warn('Tabela membros_comissao indisponível ou vazia no Supabase:', error.message);
+      return null;
+    }
+
+    if (data && data.length > 0) {
+      return data.map((row: any) => ({
+        id: row.id,
+        nome: row.nome,
+        titulacao: row.titulacao || 'Dr.',
+        instituicao: row.instituicao,
+        papel: row.papel === 'presidente' ? 'presidente' : 'avaliador',
+        email: row.email,
+        telefone: row.telefone || '',
+        senhaAcesso: row.senha_acesso || 'premio',
+      }));
+    }
+    return null;
+  } catch (err) {
+    console.warn('Erro ao carregar membros do Supabase:', err);
+    return null;
+  }
+}
+
+// Salvar / Sincronizar todos os membros da comissão no Supabase
+export async function sincronizarMembrosComissaoSupabase(
+  membros: Avaliador[]
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const payload = membros.map((m, index) => ({
+      id: m.id,
+      nome: m.nome,
+      titulacao: m.titulacao,
+      instituicao: m.instituicao,
+      papel: m.papel,
+      email: m.email,
+      telefone: m.telefone || null,
+      senha_acesso: m.senhaAcesso,
+      ordem: index + 1,
+      updated_at: new Date().toISOString(),
+    }));
+
+    const { error } = await supabase
+      .from('membros_comissao')
+      .upsert(payload, { onConflict: 'id' });
+
+    if (error) {
+      console.warn('Erro ao sincronizar membros no Supabase:', error.message);
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, error: message };
+  }
+}
+
+// Atualizar senha do avaliador no Supabase (tanto em membros_comissao quanto no Supabase Auth)
+export async function atualizarSenhaMembroSupabase(
+  avaliadorId: string,
+  email: string,
+  novaSenha: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // 1. Atualiza na tabela membros_comissao
+    const { error: dbError } = await supabase
+      .from('membros_comissao')
+      .update({
+        senha_acesso: novaSenha,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', avaliadorId);
+
+    if (dbError) {
+      console.warn('Aviso ao atualizar senha na tabela membros_comissao:', dbError.message);
+    }
+
+    // 2. Se houver sessão ativa no Supabase Auth, atualiza a senha do usuário
+    try {
+      const { error: authError } = await supabase.auth.updateUser({
+        password: novaSenha,
+      });
+      if (authError) {
+        console.warn('Aviso do Supabase Auth updateUser:', authError.message);
+      }
+    } catch {
+      // Ignora se não houver sessão ativa do Supabase Auth
+    }
+
+    return { success: true };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, error: message };
+  }
+}
+

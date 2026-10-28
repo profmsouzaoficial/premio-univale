@@ -12,7 +12,12 @@ import { Lock, Loader2 } from 'lucide-react';
 import { DISSERTACOES_INDICADAS, AVALIADORES_PADRAO } from './data/dissertacoesData';
 import { computeConsolidatedRanking } from './utils/evaluationUtils';
 import { AvaliacaoDissertacao, Avaliador } from './types';
-import { carregarAvaliacoesSupabase } from './services/supabaseClient';
+import { 
+  carregarAvaliacoesSupabase, 
+  carregarMembrosComissaoSupabase, 
+  sincronizarMembrosComissaoSupabase, 
+  atualizarSenhaMembroSupabase 
+} from './services/supabaseClient';
 
 
 const STORAGE_AVALIACOES_KEY = 'ppg_git_avaliacoes_2025_v3';
@@ -78,6 +83,19 @@ export default function App() {
 
   const avaliadorAtivo =
     avaliadores.find((a) => a.id === avaliadorAtivoId) || avaliadores[0];
+
+  // Carregamento inicial da lista de membros do Supabase
+  useEffect(() => {
+    let ativo = true;
+    async function carregarMembros() {
+      const membrosDb = await carregarMembrosComissaoSupabase();
+      if (ativo && membrosDb && membrosDb.length > 0) {
+        setAvaliadores(membrosDb);
+      }
+    }
+    carregarMembros();
+    return () => { ativo = false; };
+  }, []);
 
   // Carregamento de avaliações do Supabase para o avaliador ativo (ou todas se for o Presidente)
   useEffect(() => {
@@ -167,9 +185,41 @@ export default function App() {
     exibirToast('Avaliação registrada com sucesso!');
   };
 
-  const handleSalvarAvaliadores = (novosAvaliadores: Avaliador[]) => {
+  const handleSalvarAvaliadores = async (novosAvaliadores: Avaliador[]) => {
     setAvaliadores(novosAvaliadores);
-    exibirToast('Comissão avaliadora atualizada!');
+    try {
+      localStorage.setItem(STORAGE_AVALIADORES_KEY, JSON.stringify(novosAvaliadores));
+    } catch (e) {
+      console.warn('Erro ao salvar avaliadores localmente:', e);
+    }
+
+    // Se o usuário logado teve sua presidência alterada, atualiza as permissões de sessão
+    const souPresidente = novosAvaliadores.some(
+      (a) => a.id === avaliadorAtivoId && a.papel === 'presidente'
+    );
+    setIsPresidenteAutenticado(souPresidente);
+    try {
+      sessionStorage.setItem(STORAGE_IS_PRESIDENTE, souPresidente ? 'true' : 'false');
+    } catch {}
+
+    // Sincroniza diretamente com o Supabase
+    const res = await sincronizarMembrosComissaoSupabase(novosAvaliadores);
+    if (res.success) {
+      exibirToast('Comissão avaliadora atualizada e salva no Supabase!');
+    } else {
+      exibirToast('Alterações salvas localmente (execute o SQL no Supabase para sincronizar em nuvem).');
+    }
+  };
+
+  const handleAtualizarSenha = async (avaliadorId: string, email: string, novaSenha: string) => {
+    const res = await atualizarSenhaMembroSupabase(avaliadorId, email, novaSenha);
+    if (res.success) {
+      setAvaliadores((prev) =>
+        prev.map((a) => (a.id === avaliadorId ? { ...a, senhaAcesso: novaSenha } : a))
+      );
+      exibirToast('Senha atualizada com sucesso no Supabase!');
+    }
+    return res;
   };
 
   // Navegação entre dissertações
@@ -378,7 +428,10 @@ export default function App() {
         aberto={modalComissaoAberto}
         onFechar={() => setModalComissaoAberto(false)}
         avaliadores={avaliadores}
+        avaliadorLogado={avaliadorAtivo}
+        isPresidente={Boolean(isPresidenteAutenticado || avaliadorAtivo?.papel === 'presidente')}
         onSalvarAvaliadores={handleSalvarAvaliadores}
+        onAtualizarSenha={handleAtualizarSenha}
       />
 
       <AtaModal
